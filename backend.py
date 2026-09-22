@@ -42,9 +42,6 @@ def get_database_url():
 
     return database_url
 
-url= get_database_url()
-print(url)
-
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 if not GROQ_API_KEY:
     raise ValueError("GROQ_API_KEY is missing. Please add it to your .env file.")
