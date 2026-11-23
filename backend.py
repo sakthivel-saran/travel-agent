@@ -12,10 +12,8 @@ import uuid
 import asyncio
 import json
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
-from psycopg.rows import dict_row
-from psycopg_pool import ConnectionPool
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.postgres import PostgresSaver
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command, interrupt
 from langchain_core.messages import (
     AnyMessage,
@@ -33,22 +31,6 @@ from mcp_client import (
     forecast_mcp_search,
     weather_mcp_search,
 )
-
-
-def get_database_url():
-    database_url = os.getenv("DATABASE_URL")
-
-    if not database_url:
-        raise ValueError(
-            "DATABASE_URL is missing. "
-            "Please add your Render PostgreSQL External Database URL to .env"
-        )
-
-    if "sslmode=" not in database_url:
-        separator = "&" if "?" in database_url else "?"
-        database_url = f"{database_url}{separator}sslmode=require"
-
-    return database_url
 
 
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
@@ -728,22 +710,9 @@ graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
 
 # =========================
-# PostgreSQL Checkpointer - pooled connections handle provider idle timeouts
+# In-memory checkpointer keeps review state for the lifetime of this process.
 # =========================
-DATABASE_URL = get_database_url()
-_connection_pool = ConnectionPool(
-    conninfo=DATABASE_URL,
-    min_size=1,
-    max_size=5,
-    kwargs={
-        "autocommit": True,
-        "prepare_threshold": 0,
-        "row_factory": dict_row,
-    },
-    check=ConnectionPool.check_connection,
-)
-checkpointer = PostgresSaver(_connection_pool)
-checkpointer.setup()
+checkpointer = MemorySaver()
 
 travel_graph = graph.compile(checkpointer=checkpointer)
 

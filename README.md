@@ -2,7 +2,7 @@
 
 TripMate AI is a web-based travel planner powered by a LangGraph multi-agent workflow. Describe a trip in natural language, review the generated draft, and approve it or request changes before the system produces a final plan.
 
-The application combines a FastAPI web app, a browser interface, LLM-based planning agents, external travel and weather tools exposed through Model Context Protocol (MCP), and PostgreSQL-backed workflow checkpoints.
+The application combines a FastAPI web app, a browser interface, LLM-based planning agents, and external travel and weather tools exposed through Model Context Protocol (MCP). Workflow review state is held in memory; no database is required.
 
 ## Features
 
@@ -13,7 +13,7 @@ The application combines a FastAPI web app, a browser interface, LLM-based plann
 - **Weather information:** retrieves current weather and forecast data with a local OpenWeather MCP server.
 - **Budget analysis and itinerary planning:** creates an integrated, budget-aware draft.
 - **Human review:** pause the workflow to approve the draft or provide revision feedback.
-- **Persistent conversations:** LangGraph checkpoints workflow state in PostgreSQL and uses a thread ID to resume a plan.
+- **Human review:** in-memory LangGraph checkpoints let the user approve a draft or request revisions within the current app process.
 - **Web interface:** submit prompts, see the agents selected, review results, copy the plan, or download it as a PDF.
 - **HTTP API and health endpoint:** use the planner from the included UI or another client.
 
@@ -24,7 +24,7 @@ Travel search results and generated plans are informational. Verify schedules, p
 1. The browser sends a travel prompt to `POST /api/travel`.
 2. The supervisor checks the prompt and chooses among flight, hotel, weather, budget, and itinerary agents.
 3. Selected agents gather information through the MCP client and produce specialist results.
-4. The itinerary agent combines the results into a draft. LangGraph checkpoints the workflow and pauses for human review.
+4. The itinerary agent combines the results into a draft. LangGraph keeps the workflow in memory and pauses for human review.
 5. The UI sends approval or revision feedback to `POST /api/travel/approve` with the same thread ID.
 6. The workflow resumes and returns the final response.
 
@@ -33,7 +33,7 @@ Travel search results and generated plans are informational. Verify schedules, p
 - Python 3.11 (the supplied Docker image uses Python 3.11)
 - FastAPI, Uvicorn, and Jinja2
 - LangGraph, LangChain, and Groq
-- PostgreSQL with Psycopg and the LangGraph PostgreSQL checkpointer
+- LangGraph in-memory checkpointer
 - Tavily MCP, AviationStack MCP, and a local OpenWeather MCP server
 - HTML, CSS, and JavaScript frontend
 
@@ -57,7 +57,6 @@ Travel search results and generated plans are informational. Verify schedules, p
 ## Requirements
 
 - Python 3.11 or newer
-- A PostgreSQL database reachable by the application
 - API credentials for Groq, Tavily, AviationStack, and OpenWeather
 - Node.js and `uvx` available on `PATH` for the AviationStack MCP server (`uvx` is provided by `uv`)
 - Internet access for the external model and travel/weather services
@@ -73,10 +72,9 @@ GROQ_API_KEY=your_groq_api_key
 TAVILY_API_KEY=your_tavily_api_key
 AVIATIONSTACK_API_KEY=your_aviationstack_api_key
 OPENWEATHER_API_KEY=your_openweather_api_key
-DATABASE_URL=postgresql://username:password@hostname:5432/database_name
 ```
 
-`DATABASE_URL` must point to a PostgreSQL database. The application adds `sslmode=require` when the URL does not specify an `sslmode` parameter. `GROQ_API_KEY` and `DATABASE_URL` are required at backend startup; the corresponding services and credentials are also needed for their agents to work. The AviationStack MCP subprocess receives `AVIATIONSTACK_API_KEY` from the environment. The Tavily API key is used to configure the hosted Tavily MCP endpoint.
+`GROQ_API_KEY` is required at backend startup. The other service credentials enable their corresponding agents. The AviationStack MCP subprocess receives `AVIATIONSTACK_API_KEY` from the environment. The Tavily API key is used to configure the hosted Tavily MCP endpoint. `DATABASE_URL` is not used.
 
 Do not commit real API keys, database passwords, or production environment files. Configure secrets through your hosting provider's environment settings when deployed.
 
@@ -109,7 +107,7 @@ Install Node.js and `uv` separately, and make sure the `node` and `uvx` commands
 
 ### 3. Configure services
 
-Create the root `.env` file using the variables above. Start or provision PostgreSQL and confirm the database URL is reachable from the machine running TripMate AI.
+Create the root `.env` file using the variables above. No database setup is required.
 
 ### 4. Start the web app
 
@@ -132,7 +130,7 @@ docker build -f dockerfile -t tripmate-ai .
 docker run --rm -p 8000:8000 --env-file .env tripmate-ai
 ```
 
-The container needs network access to PostgreSQL and the external APIs. As noted in Requirements, the supplied image does not install Node.js or `uvx`, both needed by the configured MCP subprocesses; add them to a deployment image before relying on the AviationStack integration.
+The container needs network access to the external APIs. As noted in Requirements, the supplied image does not install Node.js or `uvx`, both needed by the configured MCP subprocesses; add them to a deployment image before relying on the AviationStack integration.
 
 ## HTTP API
 
@@ -160,7 +158,7 @@ curl -X POST http://localhost:8000/api/travel \
   -d '{"message":"Plan a 5-day trip to Tokyo from Delhi for two people under $2500."}'
 ```
 
-The JSON response includes `success`, `thread_id`, the agent/workflow results, and approval fields such as `requires_approval` and `approval_request`. Keep the returned thread ID for the review request.
+The JSON response includes `success`, `thread_id`, the agent/workflow results, and approval fields such as `requires_approval` and `approval_request`. Keep the returned thread ID for the review request. In-memory workflow state is lost when the app restarts.
 
 ### `POST /api/travel/approve`
 
@@ -186,11 +184,10 @@ To approve instead:
 
 ## Troubleshooting
 
-- **Missing `GROQ_API_KEY` or `DATABASE_URL`:** add them to `.env` for local runs or to the hosting environment configuration, then restart the app.
-- **Database connection errors:** check the PostgreSQL hostname, credentials, network access, and SSL requirements. The graph initializes a PostgreSQL connection pool during backend startup.
+- **Missing `GROQ_API_KEY`:** add it to `.env` for local runs or to the hosting environment configuration, then restart the app.
 - **MCP command not found:** install Node.js and `uv` and ensure `node` and `uvx` are on `PATH` for the app process.
 - **Weather or search tool errors:** check the OpenWeather and Tavily credentials and whether the service is reachable.
-- **A plan is waiting for review:** call `/api/travel/approve` with the original `thread_id`; a new thread will not resume the paused workflow.
+- **A plan is waiting for review:** call `/api/travel/approve` with the original `thread_id` before restarting the app; a new thread or app restart cannot resume the paused workflow.
 - **Port binding on a hosting platform:** ensure the platform supplies `PORT`; `python app.py` reads it automatically. The Docker command currently uses port 8000.
 
 ## Contributing
