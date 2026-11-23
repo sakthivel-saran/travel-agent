@@ -11,6 +11,7 @@ import operator
 import uuid
 import asyncio
 import json
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from psycopg.rows import dict_row
 from psycopg_pool import ConnectionPool
 from langgraph.graph import StateGraph, START, END
@@ -61,6 +62,8 @@ if not GROQ_API_KEY:
 llm = ChatGroq(
     model="openai/gpt-oss-20b",
     api_key=GROQ_API_KEY,
+    timeout=45,
+    max_retries=1,
 )
 
 # =========================
@@ -121,6 +124,20 @@ def _llm_text(system_prompt: str, user_prompt: str) -> str:
         ]
     )
     return str(response.content)
+
+
+def _run_async_bounded(coro, timeout: int = 25):
+    """Run an MCP coroutine from a sync graph node with a hard wait limit."""
+    executor = ThreadPoolExecutor(max_workers=1)
+    try:
+        future = executor.submit(asyncio.run, coro)
+        try:
+            return future.result(timeout=timeout)
+        except FutureTimeoutError as exc:
+            future.cancel()
+            raise TimeoutError(f"Travel data service timed out after {timeout}s.") from exc
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 def _json_from_llm(text: str) -> dict[str, Any]:
@@ -324,8 +341,8 @@ def flight_agent(state: TravelState):
     query = state["user_query"]
 
     try:
-        airports = asyncio.run(aviation_mcp_call("list_airports"))
-        airlines = asyncio.run(aviation_mcp_call("list_airlines"))
+        airports = _run_async_bounded(aviation_mcp_call("list_airports"))
+        airlines = _run_async_bounded(aviation_mcp_call("list_airlines"))
 
         print("\nAIRPORTS:", airports)
         print("\nAIRLINES:", airlines)
@@ -363,9 +380,7 @@ def hotel_agent(state: TravelState):
     )
 
     try:
-        hotel_results = asyncio.run(
-            tavily_mcp_search(query)
-        )
+        hotel_results = _run_async_bounded(tavily_mcp_search(query))
 
     except Exception as exc:
         print(
@@ -398,18 +413,14 @@ def hotel_agent(state: TravelState):
 # Weather Agent - original behavior kept
 # =========================
 def weather_agent(state: TravelState):
-    city = extract_destination(
-        state["user_query"]
+    city = (
+        state.get("trip_constraints", {}).get("destination")
+        or extract_destination(state["user_query"])
     )
 
     try:
-        weather_data = asyncio.run(
-            weather_mcp_search(city)
-        )
-
-        forecast_data = asyncio.run(
-            forecast_mcp_search(city)
-        )
+        weather_data = _run_async_bounded(weather_mcp_search(city))
+        forecast_data = _run_async_bounded(forecast_mcp_search(city))
 
         weather_results = f"""
 Current Weather:

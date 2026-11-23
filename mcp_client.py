@@ -16,7 +16,9 @@ AVIATIONSTACK_API_KEY = os.getenv("AVIATIONSTACK_API_KEY")
 GROQ_API_KEY=os.getenv("GROQ_API_KEY")
 llm = ChatGroq(
     model="openai/gpt-oss-20b",
-    api_key=GROQ_API_KEY
+    api_key=GROQ_API_KEY,
+    timeout=45,
+    max_retries=1,
 )
 
 client = MultiServerMCPClient(

@@ -17,7 +17,8 @@ def get_current_weather(city: str):
             "q": city,
             "appid": OPENWEATHER_API_KEY,
             "units": "metric"
-        }
+        },
+        timeout=15,
     )
 
     data = response.json()
@@ -49,7 +50,8 @@ def get_forecast(city: str):
 
     response = requests.get(
         url,
-        params=params
+        params=params,
+        timeout=15,
     )
 
     data = response.json()
