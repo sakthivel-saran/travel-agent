@@ -11,8 +11,8 @@ import operator
 import uuid
 import asyncio
 import json
-import psycopg
 from psycopg.rows import dict_row
+from psycopg_pool import ConnectionPool
 from langgraph.graph import StateGraph, START, END
 from langgraph.checkpoint.postgres import PostgresSaver
 from langgraph.types import Command, interrupt
@@ -717,15 +717,21 @@ graph.add_edge("final_agent", END)
 graph.add_edge("guardrail_blocked", END)
 
 # =========================
-# PostgreSQL Checkpointer - original persistence kept
+# PostgreSQL Checkpointer - pooled connections handle provider idle timeouts
 # =========================
 DATABASE_URL = get_database_url()
-_conn = psycopg.connect(
-    DATABASE_URL,
-    autocommit=True,
-    row_factory=dict_row,
+_connection_pool = ConnectionPool(
+    conninfo=DATABASE_URL,
+    min_size=1,
+    max_size=5,
+    kwargs={
+        "autocommit": True,
+        "prepare_threshold": 0,
+        "row_factory": dict_row,
+    },
+    check=ConnectionPool.check_connection,
 )
-checkpointer = PostgresSaver(_conn)
+checkpointer = PostgresSaver(_connection_pool)
 checkpointer.setup()
 
 travel_graph = graph.compile(checkpointer=checkpointer)
