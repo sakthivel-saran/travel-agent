@@ -47,6 +47,29 @@ function hideError() {
   errorBox.textContent = "";
 }
 
+async function readApiResponse(response) {
+  const body = await response.text();
+  let data;
+
+  try {
+    data = body ? JSON.parse(body) : {};
+  } catch {
+    const detail = body.trim().slice(0, 240);
+    if (response.status === 504) {
+      throw new Error(
+        "The planner took too long and the deployment timed out (504). " +
+        "This trip workflow needs a long-running backend; check the deployment function logs."
+      );
+    }
+    throw new Error(detail || `The server returned HTTP ${response.status}.`);
+  }
+
+  if (!response.ok || !data.success) {
+    throw new Error(data.error || `The server returned HTTP ${response.status}.`);
+  }
+  return data;
+}
+
 function renderMarkdown(element, markdown) {
   if (typeof marked !== "undefined") {
     element.innerHTML = marked.parse(markdown || "");
@@ -146,11 +169,7 @@ async function sendMessage() {
       })
     });
 
-    const data = await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || "Something went wrong.");
-    }
+    const data = await readApiResponse(response);
 
     currentThreadId = data.thread_id;
     localStorage.setItem("travel_thread_id", currentThreadId);
@@ -203,11 +222,7 @@ async function submitApproval(approved) {
       })
     });
 
-    const data = await response.json();
-
-    if (!response.ok || !data.success) {
-      throw new Error(data.error || "Could not resume the travel workflow.");
-    }
+    const data = await readApiResponse(response);
 
     showWorkflow(data);
     hideApproval();
