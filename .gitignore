@@ -4,5 +4,6 @@ __pycache__/
 *.pyd
 .venv/
 venv/
+.env
 config.bat
 node_modules
